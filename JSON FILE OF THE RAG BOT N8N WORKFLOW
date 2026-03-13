@@ -1,0 +1,494 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chat",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "084591bd-ef5a-42d8-b4a9-b11fef00cfb3",
+      "name": "Webhook - Website Chat",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        352,
+        176
+      ],
+      "webhookId": "website-chat-webhook"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize messages from all channels\nconst item = $input.first();\nconst data = item.json;\n\nlet channel, messageText, senderId, senderName, isValidMessage = false;\n\n// 1. WhatsApp Trigger\nif (data.messages && data.messages[0]) {\n  channel = 'whatsapp';\n  messageText = data.messages[0].text?.body || '';\n  senderId = data.messages[0].from;\n  senderName = data.contacts?.[0]?.profile?.name || 'WhatsApp User';\n  isValidMessage = !!messageText;\n} \n// 2. Instagram & Facebook\nelse if (data.body?.entry?.[0]?.messaging?.[0] || data.entry?.[0]?.messaging?.[0]) {\n  const root = data.body || data;\n  const messaging = root.entry[0].messaging[0];\n  channel = root.object === 'instagram' ? 'instagram' : 'facebook';\n  messageText = messaging.message?.text || '';\n  senderId = messaging.sender?.id;\n  senderName = (channel === 'instagram') ? 'Instagram User' : 'Facebook User';\n  isValidMessage = !!messageText && !messaging.message?.is_echo;\n}\n// 3. Website Chat / Generic Webhook\nelse {\n  const root = data.body || data;\n  channel = 'website_chat';\n  // Check common webhook fields\n  messageText = root.chatInput || root.message || root.text || root.body?.text || '';\n  senderId = root.sessionId || root.user_id || root.sender_id || 'anonymous_user';\n  senderName = 'Website Visitor';\n  isValidMessage = !!messageText;\n}\n\nreturn {\n  json: {\n    channel,\n    message_text: messageText,\n    sender_id: String(senderId), // Ensure ID is a string for MongoDB/Sheets\n    sender_name: senderName,\n    is_valid: isValidMessage\n  }\n};"
+      },
+      "id": "280520ff-f6fc-4592-85b7-ea29d8887799",
+      "name": "Normalize Message Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        176
+      ]
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        528
+      ],
+      "id": "f214d8eb-dd70-4e94-a8bf-e3c57937c0df",
+      "name": "Embeddings Ollama",
+      "credentials": {
+        "ollamaApi": {
+          "id": "j9azQdGcVtfLjFTF",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=={{ $json.message_text }}",
+        "options": {
+          "systemMessage": "=Current India time (IST): {{ DateTime.now().setZone(\"Asia/Kolkata\").toFormat(\"yyyy-MM-dd HH:mm:ss\") }}\n\n\ntools:\n\nSHEET : use this tool for append or update a row by adding name or phone number whenever u receive the user's number through any way even u found the number for calling or anything.And its not mandatory to add everything at once just add any thing u received related to name, username, email , phone number(phone) , intention (u have to think it by yourself)(strictly).\n\nvectorstore : use this tool for looking for company policy and name or anything related to company.\n\nCALENDER : use this tool to create a new event or removing it or changing it or booking an appointment, removing , recreating , changing or anything related to it.You must always provide both a 'Start' and an 'End' time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS). If the user doesn't specify an end time, assume the event lasts 1 hour and also add any related title of that event u think i relatable. use the default reminder as true by default.\n\ncaller : use this tool to call the user back whenever needed.\n\ntones and accents :\n\nact like a genz with a very light genz shortcuts as well as very light slang.\ntry to be short in reply.\nbut in professional talks like when user ask to book appointment or related stuffs very fast just be professional nd after booking provide them the appoitment notice with appointment number u generated and always ask their name and phone number or email before booking. \ndon't use extra words like real quick , can i ask you something , is there any other help i can do , and related stuffs.\n\nIMPORTANT :\n\nif you get any of the error visiting the tools just tell the user \"can you please repeat it again sir?\"\n## CALENDAR PROTOCOL (ULTRA PRIORITY)\n- You are strictly forbidden from calling the CALENDER tool without an 'End' time. \n- You MUST calculate End = Start + 1 hour for every booking.\n- Format all dates as YYYY-MM-DDTHH:mm:ss.\n- If the tool returns an error, do not explain it. Say: \"My bad, let's try that timing again—what date works best?\""
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        1024,
+        176
+      ],
+      "id": "fe5d4351-80d9-4103-8429-14214480d212",
+      "name": "AI Agent",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "toolDescription": "Use this tool to initiate a phone call with a customer using Retell AI. It requires a phone number",
+        "method": "POST",
+        "url": "https://api.retellai.com/v2/create-phone-call",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('JSON', `{\n  \"from_number\": \"+12137688614\", \n  \"to_number\": \"+91<user number>\",\n  \"agent_id\": \"agent_06a40fdb9f79a6d9553930bc33\"\n}`, 'json') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.3,
+      "position": [
+        992,
+        448
+      ],
+      "id": "8152c2e2-663c-4a0d-bb3f-2bb03bd80f0d",
+      "name": "caller",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "KreavBLpz9gZgs08",
+          "name": "Bearer Auth account 2"
+        },
+        "httpHeaderAuth": {
+          "id": "KMnAIjyaj77qfLMQ",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "for append a row or column by adding name or phone number whenever u receive the user's number through any way.(strictly)",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "115AOfI30DdFexTsgwHQd8Pt6lVGpZlZsc5yVQqGFpWg",
+          "mode": "list",
+          "cachedResultName": "testing",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/115AOfI30DdFexTsgwHQd8Pt6lVGpZlZsc5yVQqGFpWg/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/115AOfI30DdFexTsgwHQd8Pt6lVGpZlZsc5yVQqGFpWg/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "email": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('email', ``, 'string') }}",
+            "phone": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('phone', ``, 'string') }}",
+            "intension": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('intension', ``, 'string') }}",
+            "name\r": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('name_', ``, 'string') }}",
+            "username\n": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('username_', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "phone"
+          ],
+          "schema": [
+            {
+              "id": "name\r",
+              "displayName": "name\r",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "username\n",
+              "displayName": "username\n",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "intension",
+              "displayName": "intension",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTool",
+      "typeVersion": 4.7,
+      "position": [
+        1136,
+        368
+      ],
+      "id": "b4251a76-9a9a-4c81-9e64-7fa329a59630",
+      "name": "SHEET",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EuPe8jd2R1JRE8hQ",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "descriptionType": "manual",
+        "toolDescription": "create a new event or removing it or changing it or booking an appointment, removing , recreating , changing or anything related to it.You must always provide both a 'Start' and an 'End' time in ISO 8601 format (YYYY-MM-DDTHH:MM:SS). If the user doesn't specify an end time, assume the event lasts 1 hour.",
+        "calendar": {
+          "__rl": true,
+          "mode": "id",
+          "value": "adc55f3a3115bc3e4b0c4154d259465c12f3bd55ecac80b53bb1f98625e8b25d@group.calendar.google.com",
+          "__regex": "(^[a-zA-Z0-9.!#$%&’*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\\.[a-zA-Z0-9-]+)*)"
+        },
+        "start": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Start', `MANDATORY: Provide the start time in ISO 8601 format (YYYY-MM-DDTHH:mm:ss). Refer to the 'Current India time' in the system prompt to ensure the date is in the future.`, 'string') }}",
+        "end": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('End', `MANDATORY: Provide the end time in ISO 8601 format. You MUST calculate this as exactly 60 minutes after the Start Time. Google will reject the request if this is missing or identical to the Start Time.`, 'string') }}",
+        "useDefaultReminders": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Use_Default_Reminders', `Set this to 'true' by default.`, 'boolean') }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.googleCalendarTool",
+      "typeVersion": 1.3,
+      "position": [
+        1184,
+        496
+      ],
+      "id": "89e5f5c0-43dc-4e96-94c7-07c45be95ea6",
+      "name": "CALENDER",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "Bgq4yjxJJ3UnGjED",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={\n  \"source_ip\": \"{{ $('Webhook - Website Chat').item.json.headers[\"x-real-ip\"] }}\" \n}",
+        "collectionName": "n8n_chat_historie",
+        "databaseName": "n8n_chat_histor",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryMongoDbChat",
+      "typeVersion": 1,
+      "position": [
+        896,
+        336
+      ],
+      "id": "0a815f81-6f41-4d05-bc17-c28b1fbadc6b",
+      "name": "MongoDB Chat Memory",
+      "credentials": {
+        "mongoDb": {
+          "id": "OY8ozmuzegGv0MBP",
+          "name": "MongoDB account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cb925e21-145c-48c8-94ee-f30f05a6daf8",
+              "leftValue": "={{ $json.is_valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        800,
+        176
+      ],
+      "id": "dddcfade-e915-4cba-a7c2-72d9d71ceacf",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "mode": "retrieve-as-tool",
+        "toolDescription": "work with your data in pinecone vector store",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "lollmao",
+          "mode": "list",
+          "cachedResultName": "lollmao"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.3,
+      "position": [
+        1312,
+        320
+      ],
+      "id": "3cbe83fb-165b-4204-8f29-132965c8f3ee",
+      "name": "vectorstore",
+      "credentials": {
+        "pineconeApi": {
+          "id": "YZNEBaNrBV6Kwoj4",
+          "name": "PineconeApi account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1088,
+        528
+      ],
+      "id": "9773299e-2ca8-468d-a422-6373d0be3b4c",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Vmpfu34l4xVXjxeo",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Website Chat": {
+      "main": [
+        [
+          {
+            "node": "Normalize Message Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Message Format": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Ollama": {
+      "ai_embedding": [
+        [
+          {
+            "node": "vectorstore",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        []
+      ]
+    },
+    "caller": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SHEET": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CALENDER": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MongoDB Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "vectorstore": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "Webhook - Website Chat": [
+      {
+        "headers": {
+          "host": "n8n.srv1319843.hstgr.cloud",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+          "content-length": "49",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate, br, zstd",
+          "accept-language": "en-US,en;q=0.9",
+          "content-type": "application/json",
+          "origin": "https://xevnex.com",
+          "priority": "u=1, i",
+          "referer": "https://xevnex.com/",
+          "sec-ch-ua": "\"Not:A-Brand\";v=\"99\", \"Google Chrome\";v=\"145\", \"Chromium\";v=\"145\"",
+          "sec-ch-ua-mobile": "?0",
+          "sec-ch-ua-platform": "\"Windows\"",
+          "sec-fetch-dest": "empty",
+          "sec-fetch-mode": "cors",
+          "sec-fetch-site": "cross-site",
+          "x-forwarded-for": "172.18.0.1",
+          "x-forwarded-host": "n8n.srv1319843.hstgr.cloud",
+          "x-forwarded-port": "443",
+          "x-forwarded-proto": "https",
+          "x-forwarded-server": "435d1b188ce6",
+          "x-real-ip": "172.18.0.1"
+        },
+        "params": {},
+        "query": {},
+        "body": {
+          "chatInput": "shadman , 7031420816 , 25 feb 4pm"
+        },
+        "webhookUrl": "https://n8n.srv1319843.hstgr.cloud/webhook/chat",
+        "executionMode": "production"
+      }
+    ]
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "857291bf2351cc25b8dab7dd9fe5064e4f3fbe858ce1e579bf6707a1d2c7a31e"
+  }
+}
